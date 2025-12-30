@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>星星堆积与指尖搅动交互</title>
+    <!-- 确保脚本按顺序加载 -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        #canvas {
+            display: block;
+        }
+
+        #loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #888;
+            font-size: 14px;
+            transition: opacity 0.5s;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        #video {
+            display: none;
+        }
+
+        /* 设置按钮样式 */
+        #settings-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            width: 45px;
+            height: 45px;
+            background: #fff;
+            border: 2px solid #ddd;
+            border-radius: 12px;
+            cursor: pointer;
+            z-index: 20;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 2px 2px 0px rgba(0,0,0,0.1);
+            transition: all 0.2s;
+        }
+        #settings-btn:hover {
+            transform: translate(-1px, -1px);
+            box-shadow: 3px 3px 0px rgba(0,0,0,0.1);
+        }
+        #settings-btn svg {
+            width: 24px;
+            height: 24px;
+            fill: #666;
+        }
+
+        /* 调色盘面板 */
+        #color-panel {
+            position: fixed;
+            top: 75px;
+            left: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(5px);
+            border: 2px solid #ddd;
+            border-radius: 15px;
+            padding: 15px;
+            display: none;
+            z-index: 20;
+            flex-direction: column;
+            gap: 10px;
+            box-shadow: 4px 4px 0px rgba(0,0,0,0.05);
+        }
+        #color-panel.show {
+            display: flex;
+        }
+        .color-option {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid transparent;
+            transition: transform 0.2s;
+        }
+        .color-option:hover {
+            transform: scale(1.1);
+        }
+        .color-option.active {
+            border-color: #333;
+        }
+
+        .status-dot {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #eee;
+            border: 1px solid #ddd;
+            z-index: 10;
+        }
+        .status-dot.active {
+            background: #4caf50;
+            box-shadow: 0 0 8px rgba(76, 175, 80, 0.4);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loading">正在加载 AI 识别环境，请稍候...</div>
+    <div id="status" class="status-dot"></div>
+    
+    <!-- 设置按钮 -->
+    <div id="settings-btn" title="设置星星颜色">
+        <svg viewBox="0 0 24 24"><path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.81,11.69,4.81,12c0,0.31,0.02,0.65,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/></svg>
+    </div>
+
+    <!-- 颜色选择面板 -->
+    <div id="color-panel">
+        <div class="color-option active" style="background: #ffeb3b;" data-fill="#ffeb3b" data-stroke="#fbc02d"></div>
+        <div class="color-option" style="background: #ff8a80;" data-fill="#ff8a80" data-stroke="#d32f2f"></div>
+        <div class="color-option" style="background: #b3e5fc;" data-fill="#b3e5fc" data-stroke="#0288d1"></div>
+        <div class="color-option" style="background: #c8e6c9;" data-fill="#c8e6c9" data-stroke="#388e3c"></div>
+        <div class="color-option" style="background: #e1bee7;" data-fill="#e1bee7" data-stroke="#7b1fa2"></div>
+        <div class="color-option" style="background: #ffccbc;" data-fill="#ffccbc" data-stroke="#e64a19"></div>
+    </div>
+
+    <video id="video" playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const videoElement = document.getElementById('video');
+        const loading = document.getElementById('loading');
+        const statusDot = document.getElementById('status');
+        const settingsBtn = document.getElementById('settings-btn');
+        const colorPanel = document.getElementById('color-panel');
+
+        let width, height;
+        let stars = []; 
+        let splashes = []; 
+        let waterPhase = 0;
+        let isPinching = false;
+        
+        // 默认星星颜色配置
+        let currentStarConfig = {
+            fill: '#ffeb3b',
+            stroke: '#fbc02d'
+        };
+
+        // UI 交互
+        settingsBtn.onclick = () => colorPanel.classList.toggle('show');
+        document.querySelectorAll('.color-option').forEach(opt => {
+            opt.onclick = () => {
+                document.querySelector('.color-option.active').classList.remove('active');
+                opt.classList.add('active');
+                currentStarConfig.fill = opt.dataset.fill;
+                currentStarConfig.stroke = opt.dataset.stroke;
+            };
+        });
+
+        let lastFingerPos = { x: 0, y: 0, active: false };
+        let fingerVel = { x: 0, y: 0 };
+
+        const COLORS = {
+            water: 'rgba(173, 216, 230, 0.5)', 
+            waterLine: 'rgba(160, 212, 232, 0.8)',
+            splash: 'rgba(180, 225, 240, 0.8)'
+        };
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        function drawHandDrawnStar(ctx, x, y, size, fill, stroke, alpha = 1) {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            ctx.beginPath();
+            ctx.fillStyle = fill;
+            ctx.strokeStyle = stroke;
+            ctx.lineWidth = size < 6 ? 0.8 : 1.2;
+            ctx.lineJoin = 'round';
+            
+            for (let i = 0; i < 5; i++) {
+                const angle = (Math.PI * 2 / 5) * i - Math.PI / 2;
+                const outerX = x + Math.cos(angle) * size;
+                const outerY = y + Math.sin(angle) * size;
+                ctx.lineTo(outerX, outerY);
+                
+                const innerAngle = angle + Math.PI / 5;
+                const innerX = x + Math.cos(innerAngle) * (size * 0.4);
+                const innerY = y + Math.sin(innerAngle) * (size * 0.4);
+                ctx.lineTo(innerX, innerY);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawWater() {
+            const waterBaseLine = height * 0.6;
+            ctx.beginPath();
+            ctx.moveTo(0, height);
+            ctx.lineTo(0, waterBaseLine);
+            
+            waterPhase += 0.02;
+            for (let x = 0; x <= width; x += 20) {
+                const y = waterBaseLine + 
+                          Math.sin(x * 0.008 + waterPhase) * 10 + 
+                          Math.cos(x * 0.012 + waterPhase * 0.5) * 5;
+                ctx.lineTo(x, y);
+            }
+            
+            ctx.lineTo(width, height);
+            ctx.fillStyle = COLORS.water;
+            ctx.fill();
+            
+            ctx.strokeStyle = COLORS.waterLine;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function createSplash(x, y) {
+            const count = 5 + Math.floor(Math.random() * 4);
+            for (let i = 0; i < count; i++) {
+                splashes.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: -Math.random() * 5 - 2,
+                    radius: Math.random() * 2 + 1,
+                    life: 1.0
+                });
+            }
+        }
+
+        function updateParticles() {
+            for (let i = splashes.length - 1; i >= 0; i--) {
+                const p = splashes[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.25; 
+                p.life -= 0.02;
+                if (p.life <= 0) {
+                    splashes.splice(i, 1);
+                    continue;
+                }
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(180, 225, 240, ${p.life})`;
+                ctx.fill();
+            }
+        }
+
+        function updateStars() {
+            const waterBaseLine = height * 0.6;
+            
+            for (let i = 0; i < stars.length; i++) {
+                let s = stars[i];
+
+                if (s.state === 'falling') {
+                    s.x += s.vx;
+                    s.y += s.vy;
+                    s.vy += 0.35; 
+                    s.rotation += s.rv;
+
+                    const surfaceY = waterBaseLine + Math.sin(s.x * 0.008 + waterPhase) * 10;
+                    if (s.y >= surfaceY) {
+                        s.state = 'sinking';
+                        s.vy *= 0.15; 
+                        s.vx *= 0.4;
+                        createSplash(s.x, surfaceY);
+                    }
+                } 
+                else {
+                    const friction = 0.94; 
+                    const waterBuoyancy = 0.03; 
+                    
+                    s.vy += waterBuoyancy;
+                    s.vy *= friction;
+                    s.vx *= friction;
+
+                    if(s.state === 'sinking') {
+                        s.vx += Math.sin(Date.now() * 0.001 + s.rotation) * 0.05;
+                    }
+
+                    s.x += s.vx;
+                    s.y += s.vy;
+                    s.rotation += s.rv * (s.state === 'sinking' ? 0.4 : 0.05);
+
+                    const bottomLimit = height - s.size * 0.8;
+                    if (s.y > bottomLimit) {
+                        s.y = bottomLimit;
+                        s.vy *= -0.1;
+                        s.state = 'settled';
+                    }
+
+                    if (lastFingerPos.active) {
+                        let dxF = s.x - lastFingerPos.x;
+                        let dyF = s.y - lastFingerPos.y;
+                        let distF = Math.sqrt(dxF*dxF + dyF*dyF);
+                        if (distF < 60) {
+                            let pushStrength = (60 - distF) * 0.02;
+                            s.vx += dxF * pushStrength + fingerVel.x * 0.2;
+                            s.vy += dyF * pushStrength + fingerVel.y * 0.2;
+                            s.state = 'sinking';
+                        }
+                    }
+
+                    for(let j = 0; j < stars.length; j++) {
+                        if(i === j) continue;
+                        let other = stars[j];
+                        if(other.state === 'falling') continue;
+
+                        let dx = s.x - other.x;
+                        let dy = s.y - other.y;
+                        let dist = Math.sqrt(dx*dx + dy*dy);
+                        let minDist = (s.size + other.size) * 0.85;
+
+                        if(dist < minDist) {
+                            let angle = Math.atan2(dy, dx);
+                            let overlap = minDist - dist;
+                            let force = overlap * 0.15;
+                            let pushX = Math.cos(angle) * force;
+                            let pushY = Math.sin(angle) * force;
+
+                            s.vx += pushX;
+                            s.vy += pushY;
+                            
+                            if(s.y > height * 0.8 && Math.abs(s.vx) < 0.1) s.state = 'settled';
+                        }
+                    }
+                }
+                
+                ctx.save();
+                ctx.translate(s.x, s.y);
+                ctx.rotate(s.rotation);
+                // 使用星星对象自带的颜色属性
+                drawHandDrawnStar(ctx, 0, 0, s.size, s.fill, s.stroke, 1);
+                ctx.restore();
+            }
+
+            if(stars.length > 250) stars.shift(); 
+        }
+
+        function animate() {
+            ctx.clearRect(0, 0, width, height);
+            updateStars(); 
+            drawWater();
+            updateParticles();
+            
+            if (lastFingerPos.active) {
+                ctx.beginPath();
+                ctx.arc(lastFingerPos.x, lastFingerPos.y, 10, 0, Math.PI*2);
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                ctx.fill();
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        window.onload = function() {
+            if (typeof Hands === 'undefined') {
+                loading.innerText = "脚本加载失败，请刷新页面重试。";
+                return;
+            }
+
+            const hands = new Hands({
+                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+            });
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.7
+            });
+
+            hands.onResults((results) => {
+                statusDot.classList.add('active');
+                if (loading.style.opacity !== '0') loading.style.opacity = '0';
+
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    const landmarks = results.multiHandLandmarks[0];
+                    
+                    const indexTip = landmarks[8];
+                    const ix = (1 - indexTip.x) * width;
+                    const iy = indexTip.y * height;
+
+                    fingerVel.x = ix - lastFingerPos.x;
+                    fingerVel.y = iy - lastFingerPos.y;
+                    
+                    lastFingerPos.x = ix;
+                    lastFingerPos.y = iy;
+                    lastFingerPos.active = true;
+
+                    const thumbTip = landmarks[4];
+                    const tx = (1 - thumbTip.x) * width;
+                    const ty = thumbTip.y * height;
+                    const distance = Math.hypot(tx - ix, ty - iy);
+
+                    if (distance < 30) { 
+                        if (!isPinching) {
+                            const size = Math.random() < 0.4 ? (5 + Math.random() * 3) : (9 + Math.random() * 5);
+                            stars.push({
+                                x: (tx + ix) / 2,
+                                y: (ty + iy) / 2,
+                                vx: (Math.random() - 0.5) * 8,
+                                vy: -8 - Math.random() * 6,
+                                size: size,
+                                // 创建星星时固化当前颜色配置
+                                fill: currentStarConfig.fill,
+                                stroke: currentStarConfig.stroke,
+                                rotation: Math.random() * Math.PI,
+                                rv: (Math.random() - 0.5) * 0.2,
+                                state: 'falling'
+                            });
+                            isPinching = true;
+                        }
+                    } else {
+                        isPinching = false;
+                    }
+                } else {
+                    lastFingerPos.active = false;
+                }
+            });
+
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
+            camera.start();
+
+            animate();
+        };
+
+        canvas.addEventListener('mousemove', (e) => {
+            fingerVel.x = e.clientX - lastFingerPos.x;
+            fingerVel.y = e.clientY - lastFingerPos.y;
+            lastFingerPos.x = e.clientX;
+            lastFingerPos.y = e.clientY;
+            lastFingerPos.active = true;
+        });
+        
+        canvas.addEventListener('mousedown', (e) => {
+            // 忽略 UI 区域的点击
+            if (e.clientX < 70 && e.clientY < 250) return;
+            
+            stars.push({
+                x: e.clientX,
+                y: e.clientY,
+                vx: (Math.random() - 0.5) * 5,
+                vy: -6,
+                size: 8 + Math.random() * 6,
+                fill: currentStarConfig.fill,
+                stroke: currentStarConfig.stroke,
+                rotation: 0,
+                rv: 0.1,
+                state: 'falling'
+            });
+        });
+
+    </script>
+</body>
+</html>
